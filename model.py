@@ -4,10 +4,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init
+import torch.backends.cudnn as cudnn
 import numpy as np
 
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-
+from torch.nn.utils.clip_grad import clip_grad_norm
 
 def l1norm(matrix, dim, eps=1e-8):
     """
@@ -275,8 +276,7 @@ class CARRNEncoder(nn.Module):
 
     def __init__(self, img_size, hidden_size, vocab_size,
                  word_embed_size, num_layers, bi_gru, smooth,
-                 norm_func, norm, activation_func, img_norm,
-                 txt_norm):
+                 norm_func, norm, activation_func):
         super(CARRNEncoder, self).__init__()
         self.base_img_enc = EncoderImagePrecomp(img_size, hidden_size)
         self.base_text_enc = EncoderText(vocab_size, word_embed_size,
@@ -313,13 +313,235 @@ class CARRNEncoder(nn.Module):
         gcn_img_embed = l2norm(gcn_img_embed)
 
         # relation-level cross-attention(relation alignment)
-
         txt_embed, img_embed, relation_attn_img, relation_attn_txt = self.cross_attn2(txt_embed, gcn_img_embed)
 
-        return txt_embed, img_embed, object_attn_img
+        return txt_embed, img_embed
+
+
+def cosine_similarity(x1, x2, dim=1, eps=1e-8):
+    """
+    Returns cosine similarity between x1 and x2, computed along dim.
+    """
+    w12 = torch.sum(x1 * x2, dim)
+    w1 = torch.norm(x1, 2, dim)
+    w2 = torch.norm(x2, 2, dim)
+    return (w12 / (w1 * w2).clamp(min=eps)).squeeze()
+
+
+def xattn_score_t2i(images, captions, cap_lens, smooth, norm_func, agg_func, lambda_lse):
+    """
+    Images: (n_image, n_regions, d) matrix of images
+    Captions: (n_caption, max_n_word, d) matrix of captions
+    CapLens: (n_caption) array of caption lengths
+    """
+    similarities = []
+    n_image = images.size(0)
+    n_caption = captions.size(0)
+    for i in range(n_caption):
+        # Get the i-th text description
+        n_word = cap_lens[i]
+        cap_i = captions[i, :n_word, :].unsqueeze(0).contiguous()
+        # --> (n_image, n_word, d)
+        cap_i_expand = cap_i.repeat(n_image, 1, 1)
+        """
+            word(query): (n_image, n_word, d)
+            image(context): (n_image, n_regions, d)
+            weiContext: (n_image, n_word, d)
+            attn: (n_image, n_region, n_word)
+        """
+        weiContext, attn = func_attention(cap_i_expand, images, smooth, norm_func)
+        cap_i_expand = cap_i_expand.contiguous()
+        weiContext = weiContext.contiguous()
+        # (n_image, n_word)
+        row_sim = cosine_similarity(cap_i_expand, weiContext, dim=2)
+        if agg_func == 'LogSumExp':
+            row_sim.mul_(lambda_lse).exp_()
+            row_sim = row_sim.sum(dim=1, keepdim=True)
+            row_sim = torch.log(row_sim) / lambda_lse
+        elif agg_func == 'Max':
+            row_sim = row_sim.max(dim=1, keepdim=True)[0]
+        elif agg_func == 'Sum':
+            row_sim = row_sim.sum(dim=1, keepdim=True)
+        elif agg_func == 'Mean':
+            row_sim = row_sim.mean(dim=1, keepdim=True)
+        else:
+            raise ValueError("unknown aggfunc: {}".format(agg_func))
+        similarities.append(row_sim)
+
+    # (n_image, n_caption)
+    similarities = torch.cat(similarities, 1)
+
+    return similarities
+
+
+def xattn_score_i2t(images, captions, cap_lens, smooth, norm_func, agg_func, lambda_lse):
+    """
+    Images: (batch_size, n_regions, d) matrix of images
+    Captions: (batch_size, max_n_words, d) matrix of captions
+    CapLens: (batch_size) array of caption lengths
+    """
+    similarities = []
+    n_image = images.size(0)
+    n_caption = captions.size(0)
+    n_region = images.size(1)
+    for i in range(n_caption):
+        # Get the i-th text description
+        n_word = cap_lens[i]
+        cap_i = captions[i, :n_word, :].unsqueeze(0).contiguous()
+        # (n_image, n_word, d)
+        cap_i_expand = cap_i.repeat(n_image, 1, 1)
+        """
+            word(query): (n_image, n_word, d)
+            image(context): (n_image, n_region, d)
+            weiContext: (n_image, n_region, d)
+            attn: (n_image, n_word, n_region)
+        """
+        weiContext, attn = func_attention(images, cap_i_expand, smooth, norm_func)
+        # (n_image, n_region)
+        row_sim = cosine_similarity(images, weiContext, dim=2)
+        if agg_func == 'LogSumExp':
+            row_sim.mul_(lambda_lse).exp_()
+            row_sim = row_sim.sum(dim=1, keepdim=True)
+            row_sim = torch.log(row_sim) / lambda_lse
+        elif agg_func == 'Max':
+            row_sim = row_sim.max(dim=1, keepdim=True)[0]
+        elif agg_func == 'Sum':
+            row_sim = row_sim.sum(dim=1, keepdim=True)
+        elif agg_func == 'Mean':
+            row_sim = row_sim.mean(dim=1, keepdim=True)
+        else:
+            raise ValueError("unknown aggfunc: {}".format(agg_func))
+        similarities.append(row_sim)
+
+    # (n_image, n_caption)
+    similarities = torch.cat(similarities, 1)
+    return similarities
+
+
+class ContrastiveLoss(nn.Module):
+    """
+    Compute contrastive loss
+    """
+    
+    def __init__(self, smooth, norm_func, agg_func, lambda_lse, margin=0, alpha=0.5, max_violation=False):
+        super(ContrastiveLoss, self).__init__()
+        self.smooth = smooth
+        self.norm_func = norm_func
+        self.agg_func = agg_func
+        self.lambda_lse = lambda_lse
+        self.margin = margin
+        self.alpha = alpha
+        self.max_violation = max_violation
+
+    def forward(self, images, captions, cap_lengths):
+        # compute image-sentence score matrix
+        t2i_scores = xattn_score_t2i(images, captions, cap_lengths, self.smooth,
+                                     self.norm_func, self.agg_func, self.lambda_lse)
+        i2t_scores = xattn_score_i2t(images, captions, cap_lengths, self.smooth,
+                                     self.norm_func, self.agg_func, self.lambda_lse)
+
+        scores = self.alpha * t2i_scores + (1 - self.alpha) * i2t_scores
+
+        diagonal = scores.diag().view(images.size(0), 1)
+        d1 = diagonal.expand_as(scores)
+        d2 = diagonal.t().expand_as(scores)
+
+        # compare every diagonal score to scores in its column
+        # caption retrieval
+        cost_s = (self.margin + scores - d1).clamp(min=0)
+        # compare every diagonal score to scores in its row
+        # image retrieval
+        cost_im = (self.margin + scores - d2).clamp(min=0)
+
+        # clear diagonals
+        mask = torch.eye(scores.size(0)) > .5
+        I = mask
+        if torch.cuda.is_available():
+            I = I.cuda()
+        cost_s = cost_s.masked_fill_(I, 0)
+        cost_im = cost_im.masked_fill_(I, 0)
+
+        # keep the maximum violating negative for each query
+        if self.max_violation:
+            cost_s = cost_s.max(1)[0]
+            cost_im = cost_im.max(0)[0]
+        return cost_s.sum() + cost_im.sum()
 
 
 class CARRN(object):
     def __init__(self, opt):
+        # build Models
         self.grad_clip = opt.grad_clip
-        self.encoder = CARRNEncoder()
+        self.encoder = CARRNEncoder(opt.img_size, opt.hidden_size, opt.vocab_size,
+                                    opt.word_embed_size, opt.num_layers, opt.bi_gru,
+                                    opt.smooth, opt.norm_func, opt.norm, opt.activation_func)
+        if torch.cuda.is_available():
+            self.encoder.cuda()
+            cudnn.benchmark = True
+
+        self.criterion = ContrastiveLoss(opt.smooth, opt.norm_func, opt.agg_func, opt.lambda_lse,
+                                         opt.margin, opt.alpha, opt.max_violation)
+
+        params = list(self.encoder.parameters())
+
+        self.params = params
+        self.optimizer = torch.optim.Adam(params, lr=opt.learning_rate)
+
+        self.Eiters = 0
+
+    def state_dict(self):
+        state_dict = self.encoder.state_dict()
+        return state_dict
+
+    def load_state_dict(self, state_dict):
+        self.ecoder.load_state_dict(state_dict)
+
+    def train_start(self):
+        """
+        switch to train mode
+        """
+        self.encoder.train()
+
+    def val_start(self):
+        """
+        switch to evaluate mode
+        """
+        self.enocder.eval()
+
+    def forward_emb(self, images, captions, lengths):
+        if torch.cuda.is_available():
+            images = images.cuda()
+            captions = captions.cuda()
+
+        txt_embed, img_embed = self.encoder(captions, images, lengths)
+
+        return txt_embed, img_embed
+
+    def forward_loss(self, img_emb, cap_emb, cap_len, **kwargs):
+        """
+        Compute the loss given pairs of image and caption embeddings
+        """
+        loss = self.criterion(img_emb, cap_emb, cap_len)
+        self.logger.update('Le', loss.data[0], img_emb.size(0))
+        return loss
+
+    def train_emb(self, images, captions, lengths, ids=None, *args):
+        """
+        One training step given images and captions.
+        """
+        self.Eiters += 1
+        self.logger.update('Eit', self.Eiters)
+        self.logger.update('lr', self.optimizer.param_groups[0]['lr'])
+
+        # compute the embeddings
+        img_emb, cap_emb, cap_lens = self.forward_emb(images, captions, lengths)
+
+        # measure accuracy and record loss
+        self.optimizer.zero_grad()
+        loss = self.forward_loss(img_emb, cap_emb, cap_lens)
+
+        # compute gradient and do SGD step
+        loss.backward()
+        if self.grad_clip > 0:
+            clip_grad_norm(self.params, self.grad_clip)
+        self.optimizer.step()
