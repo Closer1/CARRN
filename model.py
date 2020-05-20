@@ -1,5 +1,8 @@
+import math
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.nn.init
 import numpy as np
 
@@ -22,12 +25,7 @@ def l2norm(matrix, dim, eps=1e-8):
 
 
 def func_attention(query, context, smooth, norm_func):
-    """
-    :param query:  (batch_size, query_length, d)
-    :param context:  (batch_size, context_length, d)
-    :param smooth: temperature parameter in softmax
-    :return:
-    """
+
     batch_size = query.size(0)
     query_length = query.size(1)
     context_length = context.size(1)
@@ -82,6 +80,10 @@ def func_attention(query, context, smooth, norm_func):
     weighted_context = torch.bmm(attn, context)
 
     return weighted_context, attn
+
+
+def gelu(x):
+    return x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0)))
 
 
 class EncoderText(nn.Module):
@@ -163,7 +165,9 @@ class EncoderImagePrecomp(nn.Module):
 
 
 class GCN(nn.Module):
-
+    """
+    from VSRN
+    """
     def __init__(self, in_channels, inter_channels, bn_layer=True):
         super(GCN, self).__init__()
 
@@ -230,14 +234,92 @@ class GCN(nn.Module):
         return v_star
 
 
-class CARRN(nn.Module):
+class CrossAttentionLayer(nn.Module):
 
-    def __init__(self, img_size, hidden_size, vocab_size, word_embed_size, num_layers, use_abs, img_norm):
-        super(CRN, self).__init__()
-        self.base_img_enc = EncoderImagePrecomp(img_size, hidden_size,
-                                                use_abs, img_norm)
+    def __init__(self, hidden_size, smooth, norm_func, norm=True, activation_fun='relu'):
+        super(CrossAttentionLayer, self).__init__()
+        self.norm_func = norm_func
+        self.smooth = smooth
+        self.fc_img = nn.Linear(hidden_size, hidden_size)
+        self.fc_txt = nn.Linear(hidden_size, hidden_size)
+
+        self.norm = norm
+        self.activation_fun = activation_fun
+
+    def forward(self, txt_embed, img_embed):
+        txt_attn_embed, attn_img = func_attention(txt_embed, img_embed, self.smooth, self.norm_func)
+        img_attn_embed, attn_txt = func_attention(img_embed, txt_embed, self.smooth, self.norm_func)
+        txt_attn_embed = self.fc_txt(txt_attn_embed)
+        img_attn_embed = self.fc_img(img_attn_embed)
+
+        if self.activation_fun == 'relu':
+            txt_attn_output = F.relu(txt_attn_embed)
+            img_attn_output = F.relu(img_attn_embed)
+        elif self.activation_fun == 'gelu':
+            txt_attn_output = gelu(txt_attn_embed)
+            img_attn_output = gelu(img_attn_embed)
+        elif self.activation_fun == 'no_activation_fun':
+            txt_attn_output = txt_attn_embed
+            img_attn_output = img_attn_embed
+        else:
+            raise ValueError('Unknown activation function :', self.activation_fun)
+
+        if self.norm:
+            txt_attn_output = l2norm(txt_attn_output, -1)
+            img_attn_output = l2norm(img_attn_output, -1)
+
+        return txt_attn_output, img_attn_output, attn_img, attn_txt
+
+
+class CARRNEncoder(nn.Module):
+
+    def __init__(self, img_size, hidden_size, vocab_size,
+                 word_embed_size, num_layers, bi_gru, smooth,
+                 norm_func, norm, activation_func, img_norm,
+                 txt_norm):
+        super(CARRNEncoder, self).__init__()
+        self.base_img_enc = EncoderImagePrecomp(img_size, hidden_size)
         self.base_text_enc = EncoderText(vocab_size, word_embed_size,
                                          hidden_size, num_layers,
-                                         bidirectional=False, text_norm=True)
+                                         bidirectional=bi_gru)
+
+        self.GCN_1 = GCN(in_channels=hidden_size, inter_channels=hidden_size)
+        self.GCN_2 = GCN(in_channels=hidden_size, inter_channels=hidden_size)
+        self.GCN_3 = GCN(in_channels=hidden_size, inter_channels=hidden_size)
+        self.GCN_4 = GCN(in_channels=hidden_size, inter_channels=hidden_size)
+
+        self.cross_attn1 = CrossAttentionLayer(hidden_size, smooth, norm_func, norm, activation_func)
+
+        self.cross_attn2 = CrossAttentionLayer(hidden_size, smooth, norm_func, norm, activation_func)
+
+    def forward(self, captions, images, lengths):
+        # embed captions and images into joint space
+        raw_txt = self.base_text_enc(captions, lengths)
+        raw_img = self.base_img_enc(images)
+
+        # object-level cross-attention
+        txt_embed, img_embed, object_attn_img, object_attn_txt = self.cross_attn1(raw_txt, raw_img)
+
+        # image object relation reasoning(object alignment)
+        # GCN_img_embed : (batch_size, hidden_size, num_regions)
+
+        gcn_img_embed = img_embed.permute(0, 2, 1)
+        gcn_img_embed = self.GCN_1(gcn_img_embed)
+        gcn_img_embed = self.GCN_2(gcn_img_embed)
+        gcn_img_embed = self.GCN_3(gcn_img_embed)
+        gcn_img_embed = self.GCN_4(gcn_img_embed)
+
+        gcn_img_embed = gcn_img_embed.permute(0, 2, 1)
+        gcn_img_embed = l2norm(gcn_img_embed)
+
+        # relation-level cross-attention(relation alignment)
+
+        txt_embed, img_embed, relation_attn_img, relation_attn_txt = self.cross_attn2(txt_embed, gcn_img_embed)
+
+        return txt_embed, img_embed, object_attn_img
 
 
+class CARRN(object):
+    def __init__(self, opt):
+        self.grad_clip = opt.grad_clip
+        self.encoder = CARRNEncoder()
