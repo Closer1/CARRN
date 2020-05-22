@@ -130,7 +130,7 @@ class EncoderText(nn.Module):
 
 
 class EncoderImagePrecomp(nn.Module):
-    def __init__(self, img_size, embed_size, use_abs=False, img_norm=False):
+    def __init__(self, img_size, embed_size, use_abs=False, img_norm=True):
         super(EncoderImagePrecomp, self).__init__()
         self.use_abs = use_abs
         self.img_norm = img_norm
@@ -274,14 +274,13 @@ class CrossAttentionLayer(nn.Module):
 
 class CARRNEncoder(nn.Module):
 
-    def __init__(self, img_size, hidden_size, vocab_size,
+    def __init__(self, img_size, hidden_size, use_abs, vocab_size,
                  word_embed_size, num_layers, bi_gru, smooth,
                  norm_func, norm, activation_func):
         super(CARRNEncoder, self).__init__()
-        self.base_img_enc = EncoderImagePrecomp(img_size, hidden_size)
-        self.base_text_enc = EncoderText(vocab_size, word_embed_size,
-                                         hidden_size, num_layers,
-                                         bidirectional=bi_gru)
+        self.base_img_enc = EncoderImagePrecomp(img_size, hidden_size, use_abs, norm)
+        self.base_text_enc = EncoderText(vocab_size, word_embed_size, hidden_size,
+                                         num_layers, bi_gru, norm)
 
         self.GCN_1 = GCN(in_channels=hidden_size, inter_channels=hidden_size)
         self.GCN_2 = GCN(in_channels=hidden_size, inter_channels=hidden_size)
@@ -472,14 +471,14 @@ class CARRN(object):
     def __init__(self, opt):
         # build Models
         self.grad_clip = opt.grad_clip
-        self.encoder = CARRNEncoder(opt.img_size, opt.hidden_size, opt.vocab_size,
+        self.encoder = CARRNEncoder(opt.img_size, opt.hidden_size, opt.use_abs, opt.vocab_size,
                                     opt.word_embed_size, opt.num_layers, opt.bi_gru,
-                                    opt.smooth, opt.norm_func, opt.norm, opt.activation_func)
+                                    opt.lambda_softmax, opt.norm_func, opt.norm, opt.activation_func)
         if torch.cuda.is_available():
             self.encoder.cuda()
             cudnn.benchmark = True
 
-        self.criterion = ContrastiveLoss(opt.smooth, opt.norm_func, opt.agg_func, opt.lambda_lse,
+        self.criterion = ContrastiveLoss(opt.lambda_softmax, opt.norm_func, opt.agg_func, opt.lambda_lse,
                                          opt.margin, opt.alpha, opt.max_violation)
 
         params = list(self.encoder.parameters())

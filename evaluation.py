@@ -7,10 +7,9 @@ import time
 import numpy as np
 from vocab import Vocabulary, deserialize_vocab  # NOQA
 import torch
-from model import SCAN, xattn_score_t2i, xattn_score_i2t
+from model import CARRN, xattn_score_t2i, xattn_score_i2t
 from collections import OrderedDict
 import time
-from torch.autograd import Variable
 
 
 class AverageMeter(object):
@@ -96,7 +95,7 @@ def encode_data(model, data_loader, log_step=10, logging=print):
         model.logger = val_logger
 
         # compute the embeddings
-        img_emb, cap_emb, cap_len = model.forward_emb(images, captions, lengths, volatile=True)
+        img_emb, cap_emb, cap_len = model.forward_emb(images, captions, lengths)
         # print(img_emb)
         if img_embs is None:
             if img_emb.dim() == 3:
@@ -129,6 +128,31 @@ def encode_data(model, data_loader, log_step=10, logging=print):
     return img_embs, cap_embs, cap_lens
 
 
+def xattn_sim(images, captions, caplens, opt, shard_size=128):
+    """
+    Computer pairwise t2i image-caption distance with locality sharding
+    """
+    n_im_shard = (len(images) - 1) / shard_size + 1
+    n_cap_shard = (len(captions) - 1) / shard_size + 1
+
+    d = np.zeros((len(images), len(captions)))
+    for i in range(n_im_shard):
+        im_start, im_end = shard_size * i, min(shard_size * (i + 1), len(images))
+        for j in range(n_cap_shard):
+            sys.stdout.write('\r>> shard_xattn_t2i batch (%d,%d)' % (i, j))
+            cap_start, cap_end = shard_size * j, min(shard_size * (j + 1), len(captions))
+            im = torch.from_numpy(images[im_start:im_end]).cuda()
+            s = torch.from_numpy(captions[cap_start:cap_end]).cuda()
+            l = caplens[cap_start:cap_end]
+            t2i_scores = xattn_score_t2i(im, s, l, opt.lambda_softmax,
+                                         opt.norm_func, opt.agg_func, opt.lambda_lse)
+            i2t_scores = xattn_score_i2t(im, s, l, opt.lambda_softmax,
+                                         opt.norm_func, opt.agg_func, opt.lambda_lse)
+            sim = opt.alpha * t2i_scores + (1 - opt.alpha) * i2t_scores
+            d[im_start:im_end, cap_start:cap_end] = sim.data.cpu().numpy()
+    sys.stdout.write('\n')
+    return d
+
 def evalrank(model_path, data_path=None, split='dev', fold5=False):
     """
     Evaluate a trained model on either dev or test. If `fold5=True`, 5 fold
@@ -147,7 +171,7 @@ def evalrank(model_path, data_path=None, split='dev', fold5=False):
     opt.vocab_size = len(vocab)
 
     # construct model
-    model = SCAN(opt)
+    model = CARRN(opt)
 
     # load model state
     model.load_state_dict(checkpoint['model'])
@@ -159,18 +183,13 @@ def evalrank(model_path, data_path=None, split='dev', fold5=False):
     print('Computing results...')
     img_embs, cap_embs, cap_lens = encode_data(model, data_loader)
     print('Images: %d, Captions: %d' %
-          (img_embs.shape[0] / 5, cap_embs.shape[0]))
+          (img_embs.shape[0] // 5, cap_embs.shape[0]))
 
     if not fold5:
         # no cross-validation, full evaluation
         img_embs = np.array([img_embs[i] for i in range(0, len(img_embs), 5)])
         start = time.time()
-        if opt.cross_attn == 't2i':
-            sims = shard_xattn_t2i(img_embs, cap_embs, cap_lens, opt, shard_size=128)
-        elif opt.cross_attn == 'i2t':
-            sims = shard_xattn_i2t(img_embs, cap_embs, cap_lens, opt, shard_size=128)
-        else:
-            raise NotImplementedError
+        sims = xattn_sim(img_embs, cap_embs, cap_lens, opt, shard_size=128)
         end = time.time()
         print("calculate similarity time:", end - start)
 
@@ -192,12 +211,7 @@ def evalrank(model_path, data_path=None, split='dev', fold5=False):
             cap_embs_shard = cap_embs[i * 5000:(i + 1) * 5000]
             cap_lens_shard = cap_lens[i * 5000:(i + 1) * 5000]
             start = time.time()
-            if opt.cross_attn == 't2i':
-                sims = shard_xattn_t2i(img_embs_shard, cap_embs_shard, cap_lens_shard, opt, shard_size=128)
-            elif opt.cross_attn == 'i2t':
-                sims = shard_xattn_i2t(img_embs_shard, cap_embs_shard, cap_lens_shard, opt, shard_size=128)
-            else:
-                raise NotImplementedError
+            sims = xattn_sim(img_embs, cap_embs, cap_lens, opt, shard_size=128)
             end = time.time()
             print("calculate similarity time:", end - start)
 
@@ -242,50 +256,6 @@ def softmax(X, axis):
     # finally: divide elementwise
     p = y / ax_sum
     return p
-
-
-def shard_xattn_t2i(images, captions, caplens, opt, shard_size=128):
-    """
-    Computer pairwise t2i image-caption distance with locality sharding
-    """
-    n_im_shard = (len(images) - 1) / shard_size + 1
-    n_cap_shard = (len(captions) - 1) / shard_size + 1
-
-    d = np.zeros((len(images), len(captions)))
-    for i in range(n_im_shard):
-        im_start, im_end = shard_size * i, min(shard_size * (i + 1), len(images))
-        for j in range(n_cap_shard):
-            sys.stdout.write('\r>> shard_xattn_t2i batch (%d,%d)' % (i, j))
-            cap_start, cap_end = shard_size * j, min(shard_size * (j + 1), len(captions))
-            im = Variable(torch.from_numpy(images[im_start:im_end]), volatile=True).cuda()
-            s = Variable(torch.from_numpy(captions[cap_start:cap_end]), volatile=True).cuda()
-            l = caplens[cap_start:cap_end]
-            sim = xattn_score_t2i(im, s, l, opt)
-            d[im_start:im_end, cap_start:cap_end] = sim.data.cpu().numpy()
-    sys.stdout.write('\n')
-    return d
-
-
-def shard_xattn_i2t(images, captions, caplens, opt, shard_size=128):
-    """
-    Computer pairwise i2t image-caption distance with locality sharding
-    """
-    n_im_shard = (len(images) - 1) / shard_size + 1
-    n_cap_shard = (len(captions) - 1) / shard_size + 1
-
-    d = np.zeros((len(images), len(captions)))
-    for i in range(n_im_shard):
-        im_start, im_end = shard_size * i, min(shard_size * (i + 1), len(images))
-        for j in range(n_cap_shard):
-            sys.stdout.write('\r>> shard_xattn_i2t batch (%d,%d)' % (i, j))
-            cap_start, cap_end = shard_size * j, min(shard_size * (j + 1), len(captions))
-            im = Variable(torch.from_numpy(images[im_start:im_end]), volatile=True).cuda()
-            s = Variable(torch.from_numpy(captions[cap_start:cap_end]), volatile=True).cuda()
-            l = caplens[cap_start:cap_end]
-            sim = xattn_score_i2t(im, s, l, opt)
-            d[im_start:im_end, cap_start:cap_end] = sim.data.cpu().numpy()
-    sys.stdout.write('\n')
-    return d
 
 
 def i2t(images, captions, caplens, sims, npts=None, return_ranks=False):
