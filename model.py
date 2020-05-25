@@ -10,6 +10,7 @@ import numpy as np
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch.nn.utils.clip_grad import clip_grad_norm
 
+
 def l1norm(matrix, dim, eps=1e-8):
     """
     l1 normalization
@@ -235,6 +236,32 @@ class GCN(nn.Module):
         return v_star
 
 
+def cross_attention(images, captions, cap_lens, smooth, norm_func):
+    """
+    Images: (n_image, n_region, d)
+    Captions: (n_caption, max_n_word, d)
+    cap_lens: (n_caption, )
+    """
+    n_caption = captions.size(0)
+    attn_cap = torch.zeros_like(captions)
+    attn_img = torch.zeros_like(images)
+
+    for i in range(n_caption):
+        n_word = cap_lens[i]
+        # cap_i:(1, n_word, d)
+        cap_i = captions[i, :n_word, :].unsqueeze(0).contiguous()
+        # img_i:(1, n_region, d)
+        img_i = images[i].unsqueeze(0).contiguous()
+
+        attn_cap_i, _ = func_attention(cap_i, img_i, smooth, norm_func)
+        attn_img_i, _ = func_attention(img_i, cap_i, smooth, norm_func)
+
+        attn_cap[i] = attn_cap_i
+        attn_img[i] = attn_img_i
+
+    return attn_cap, attn_img
+
+
 class CrossAttentionLayer(nn.Module):
 
     def __init__(self, hidden_size, smooth, norm_func, norm=True, activation_fun='relu'):
@@ -247,9 +274,8 @@ class CrossAttentionLayer(nn.Module):
         self.norm = norm
         self.activation_fun = activation_fun
 
-    def forward(self, txt_embed, img_embed):
-        txt_attn_embed, attn_img = func_attention(txt_embed, img_embed, self.smooth, self.norm_func)
-        img_attn_embed, attn_txt = func_attention(img_embed, txt_embed, self.smooth, self.norm_func)
+    def forward(self, txt_embed, img_embed, lengths):
+        txt_attn_embed, img_attn_embed = cross_attention(img_embed, txt_embed, lengths, self.smooth, self.norm_func)
         txt_attn_embed = self.fc_txt(txt_attn_embed)
         img_attn_embed = self.fc_img(img_attn_embed)
 
@@ -269,7 +295,7 @@ class CrossAttentionLayer(nn.Module):
             txt_attn_output = l2norm(txt_attn_output, -1)
             img_attn_output = l2norm(img_attn_output, -1)
 
-        return txt_attn_output, img_attn_output, attn_img, attn_txt
+        return txt_attn_output, img_attn_output
 
 
 class CARRNEncoder(nn.Module):
@@ -297,7 +323,7 @@ class CARRNEncoder(nn.Module):
         raw_img = self.base_img_enc(images)
 
         # object-level cross-attention
-        txt_embed, img_embed, object_attn_img, object_attn_txt = self.cross_attn1(raw_txt, raw_img)
+        txt_embed, img_embed = self.cross_attn1(raw_txt, raw_img, lengths)
 
         # image object relation reasoning(object alignment)
         # GCN_img_embed : (batch_size, hidden_size, num_regions)
@@ -312,7 +338,7 @@ class CARRNEncoder(nn.Module):
         gcn_img_embed = l2norm(gcn_img_embed, 2)
 
         # relation-level cross-attention(relation alignment)
-        txt_embed, img_embed, relation_attn_img, relation_attn_txt = self.cross_attn2(txt_embed, gcn_img_embed)
+        txt_embed, img_embed = self.cross_attn2(txt_embed, gcn_img_embed, lengths)
 
         return txt_embed, img_embed
 
