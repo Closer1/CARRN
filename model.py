@@ -115,7 +115,7 @@ class EncoderText(nn.Module):
         # RNN forward propagate RNN
         packed_out, _ = self.gru(packed_x)
         # out: (batch_size, seq_len, num_directions * embed_size)
-        out, out_len = pad_packed_sequence(packed_x, batch_first=True)
+        out, out_len = pad_packed_sequence(packed_out, batch_first=True)
 
         if self.use_bi_gru:
             # out: (batch_size, seq_len, embed_size)
@@ -293,7 +293,7 @@ class CARRNEncoder(nn.Module):
 
     def forward(self, captions, images, lengths):
         # embed captions and images into joint space
-        raw_txt = self.base_text_enc(captions, lengths)
+        raw_txt, _ = self.base_text_enc(captions, lengths)
         raw_img = self.base_img_enc(images)
 
         # object-level cross-attention
@@ -309,7 +309,7 @@ class CARRNEncoder(nn.Module):
         gcn_img_embed = self.GCN_4(gcn_img_embed)
 
         gcn_img_embed = gcn_img_embed.permute(0, 2, 1)
-        gcn_img_embed = l2norm(gcn_img_embed)
+        gcn_img_embed = l2norm(gcn_img_embed, 2)
 
         # relation-level cross-attention(relation alignment)
         txt_embed, img_embed, relation_attn_img, relation_attn_txt = self.cross_attn2(txt_embed, gcn_img_embed)
@@ -533,11 +533,11 @@ class CARRN(object):
         self.logger.update('lr', self.optimizer.param_groups[0]['lr'])
 
         # compute the embeddings
-        img_emb, cap_emb, cap_lens = self.forward_emb(images, captions, lengths)
+        img_emb, cap_emb = self.forward_emb(images, captions, lengths)
 
         # measure accuracy and record loss
         self.optimizer.zero_grad()
-        loss = self.forward_loss(img_emb, cap_emb, cap_lens)
+        loss = self.forward_loss(img_emb, cap_emb, lengths)
 
         # compute gradient and do SGD step
         loss.backward()

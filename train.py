@@ -69,10 +69,12 @@ def main():
                         help='LogSumExp temp')
     parser.add_argument('--lambda_softmax', default=9., type=float,
                         help='Attention softmax temperature')
-    parser.add_argument('--actication_func', default='relu',
+    parser.add_argument('--activation_func', default='relu',
                         help='activation function: relu|gelu|no_activation_fun')
     parser.add_argument('--alpha', default=.5, type=float,
                         help='the weight of final score between i2t score and t2i score')
+    parser.add_argument('--use_abs', action='store_true',
+                        help='take the absolute value of embedding vectors')
 
     opt = parser.parse_args()
     print(opt)
@@ -88,8 +90,7 @@ def main():
     train_loader, val_loader = data.get_loaders(opt.data_name, vocab, opt.batch_size, opt.workers, opt)
 
     # Construct the model
-    model = CARRN
-
+    model = CARRN(opt)
     best_rsum = 0
     start_epoch = 0
 
