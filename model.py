@@ -256,8 +256,8 @@ def cross_attention(images, captions, cap_lens, smooth, norm_func):
         attn_cap_i, _ = func_attention(cap_i, img_i, smooth, norm_func)
         attn_img_i, _ = func_attention(img_i, cap_i, smooth, norm_func)
 
-        attn_cap[i] = attn_cap_i
-        attn_img[i] = attn_img_i
+        attn_cap[i, :n_word, :] = attn_cap_i.squeeze(0)
+        attn_img[i] = attn_img_i.squeeze(0)
 
     return attn_cap, attn_img
 
