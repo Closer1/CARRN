@@ -32,7 +32,7 @@ def func_attention(query, context, smooth, norm_func):
     context_length = context.size(1)
 
     # query_transpose: (batch_size, d, query_length)
-    query_transpose = torch.transpose(context, 1, 2)
+    query_transpose = torch.transpose(query, 1, 2)
 
     # score: (batch_size, context_length, query_length)
     score = torch.bmm(context, query_transpose)
