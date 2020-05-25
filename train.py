@@ -21,7 +21,7 @@ def main():
                         help='path to datasets')
     parser.add_argument('--data_name', default='precomp',
                         help='{coco, f30k}_precomp')
-    parser.add_argument('--vocab_path', default='./data/vocab/',
+    parser.add_argument('--vocab_path', default='./vocab/',
                         help='Path to saved vocablulary json files')
     parser.add_argument('--margin', default='0.2', type=float,
                         help='Rank loss margin.')
@@ -83,7 +83,7 @@ def main():
     tb_logger.configure(opt.logger_name, flush_secs=5)
 
     # load Vocabulary Wrapper
-    vocab = deserialize_vocab(os.path.join(opt.vocab_path, '%s_vocab_json' % opt.data_name))
+    vocab = deserialize_vocab(os.path.join(opt.vocab_path, '%s_vocab.json' % opt.data_name))
     opt.vocab_size = len(vocab)
 
     # load data loaders
