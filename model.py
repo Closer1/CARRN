@@ -20,7 +20,7 @@ def l1norm(matrix, dim, eps=1e-8):
 
 
 def l2norm(matrix, dim, eps=1e-8):
-    norm = torch.pow(matrix, matrix).sum(dim=dim, keepdim=True).sqrt() + eps
+    norm = torch.pow(matrix, 2).sum(dim=dim, keepdim=True).sqrt() + eps
     matrix = matrix / norm
     return matrix
 
@@ -521,9 +521,6 @@ class CARRN(object):
         Compute the loss given pairs of image and caption embeddings
         """
         loss = self.criterion(img_emb, cap_emb, cap_len)
-        print('**********')
-        print(loss.item())
-        print('**********')
         self.logger.update('Le', loss.item(), img_emb.size(0))
         return loss
 
