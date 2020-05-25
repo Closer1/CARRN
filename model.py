@@ -521,6 +521,9 @@ class CARRN(object):
         Compute the loss given pairs of image and caption embeddings
         """
         loss = self.criterion(img_emb, cap_emb, cap_len)
+        print('**********')
+        print(loss.item())
+        print('**********')
         self.logger.update('Le', loss.item(), img_emb.size(0))
         return loss
 
