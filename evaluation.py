@@ -128,7 +128,7 @@ def encode_data(model, data_loader, log_step=10, logging=print):
     return img_embs, cap_embs, cap_lens
 
 
-def xattn_sim(images, captions, caplens, opt, shard_size=128):
+def xattn_sim(images, captions, caplens, opt, shard_size=64):
     """
     Computer pairwise t2i image-caption distance with locality sharding
     """
@@ -152,6 +152,7 @@ def xattn_sim(images, captions, caplens, opt, shard_size=128):
             d[im_start:im_end, cap_start:cap_end] = sim.data.cpu().numpy()
     sys.stdout.write('\n')
     return d
+
 
 def evalrank(model_path, data_path=None, split='dev', fold5=False):
     """
@@ -189,7 +190,7 @@ def evalrank(model_path, data_path=None, split='dev', fold5=False):
         # no cross-validation, full evaluation
         img_embs = np.array([img_embs[i] for i in range(0, len(img_embs), 5)])
         start = time.time()
-        sims = xattn_sim(img_embs, cap_embs, cap_lens, opt, shard_size=128)
+        sims = xattn_sim(img_embs, cap_embs, cap_lens, opt, shard_size=64)
         end = time.time()
         print("calculate similarity time:", end - start)
 
@@ -211,7 +212,7 @@ def evalrank(model_path, data_path=None, split='dev', fold5=False):
             cap_embs_shard = cap_embs[i * 5000:(i + 1) * 5000]
             cap_lens_shard = cap_lens[i * 5000:(i + 1) * 5000]
             start = time.time()
-            sims = xattn_sim(img_embs, cap_embs, cap_lens, opt, shard_size=128)
+            sims = xattn_sim(img_embs, cap_embs, cap_lens, opt, shard_size=64)
             end = time.time()
             print("calculate similarity time:", end - start)
 

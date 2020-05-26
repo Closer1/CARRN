@@ -193,7 +193,7 @@ def validate(opt, val_loader, model):
     img_embs = numpy.array([img_embs[i] for i in range(0, len(img_embs), 5)])
 
     start = time.time()
-    sims = xattn_sim(img_embs, cap_embs, cap_lens, opt, shard_size=128)
+    sims = xattn_sim(img_embs, cap_embs, cap_lens, opt, shard_size=64)
     end = time.time()
     print("calculate similarity time:", end-start)
 
