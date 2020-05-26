@@ -519,7 +519,7 @@ class CARRN(object):
         return state_dict
 
     def load_state_dict(self, state_dict):
-        self.ecoder.load_state_dict(state_dict)
+        self.encoder.load_state_dict(state_dict)
 
     def train_start(self):
         """
@@ -531,7 +531,7 @@ class CARRN(object):
         """
         switch to evaluate mode
         """
-        self.enocder.eval()
+        self.encoder.eval()
 
     def forward_emb(self, images, captions, lengths):
         if torch.cuda.is_available():
