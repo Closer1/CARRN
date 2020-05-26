@@ -27,7 +27,7 @@ def main():
                         help='Rank loss margin.')
     parser.add_argument('--num_epochs', default=30, type=int,
                         help='Number of training epochs.')
-    parser.add_argument('--batch_size', default=128, type=int,
+    parser.add_argument('--batch_size', default=64, type=int,
                         help='Number of training epochs.')
     parser.add_argument('--word_embed_size', default=300, type=int,
                         help='Dimensionality of the word embedding')
@@ -37,15 +37,15 @@ def main():
                         help='Gradient clipping threshold')
     parser.add_argument('--num_layers', default=1, type=int,
                         help='Number of GRU layers.')
-    parser.add_argument('--learning_rate', default=.0002, type=float,
+    parser.add_argument('--learning_rate', default=0.0002, type=float,
                         help='Initial learning rate.')
     parser.add_argument('--lr_update', default=15, type=int,
                         help='Number of epochs to update the learning rate.')
-    parser.add_argument('--workers', default=8, type=int,
+    parser.add_argument('--workers', default=10, type=int,
                         help='Number of data loader workers.')
     parser.add_argument('--log_step', default=10, type=int,
                         help='Number of steps to print and record the log')
-    parser.add_argument('--val_step', default=500, type=int,
+    parser.add_argument('--val_step', default=1000, type=int,
                         help='Number of steps to run validation.')
     parser.add_argument('--logger_name', default='./runs/runX/log',
                         help='Path to save Tensorboard log.')
@@ -72,7 +72,7 @@ def main():
                         help='Attention softmax temperature')
     parser.add_argument('--activation_func', default='relu',
                         help='activation function: relu|gelu|no_activation_fun')
-    parser.add_argument('--alpha', default=.5, type=float,
+    parser.add_argument('--alpha', default=0.5, type=float,
                         help='the weight of final score between i2t score and t2i score')
     parser.add_argument('--use_abs', action='store_true',
                         help='take the absolute value of embedding vectors')
