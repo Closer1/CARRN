@@ -139,7 +139,7 @@ def xattn_sim(images, captions, caplens, opt, shard_size=128):
     for i in range(n_im_shard):
         im_start, im_end = shard_size * i, min(shard_size * (i + 1), len(images))
         for j in range(n_cap_shard):
-            sys.stdout.write('\r>> shard_xattn_t2i batch (%d,%d)' % (i, j))
+            sys.stdout.write('\r>> xattn_sim batch (%d,%d)' % (i, j))
             cap_start, cap_end = shard_size * j, min(shard_size * (j + 1), len(captions))
             im = torch.from_numpy(images[im_start:im_end]).cuda()
             s = torch.from_numpy(captions[cap_start:cap_end]).cuda()
