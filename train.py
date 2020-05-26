@@ -23,7 +23,7 @@ def main():
                         help='{coco, f30k}_precomp')
     parser.add_argument('--vocab_path', default='./vocab/',
                         help='Path to saved vocablulary json files')
-    parser.add_argument('--margin', default='0.2', type=float,
+    parser.add_argument('--margin', default=0.2, type=float,
                         help='Rank loss margin.')
     parser.add_argument('--num_epochs', default=30, type=int,
                         help='Number of training epochs.')
@@ -37,7 +37,7 @@ def main():
                         help='Gradient clipping threshold')
     parser.add_argument('--num_layers', default=1, type=int,
                         help='Number of GRU layers.')
-    parser.add_argument('--learning_rate', default=.0002, type=float,
+    parser.add_argument('--learning_rate', default=.0005, type=float,
                         help='Initial learning rate.')
     parser.add_argument('--lr_update', default=15, type=int,
                         help='Number of epochs to update the learning rate.')
