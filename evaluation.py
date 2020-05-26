@@ -95,7 +95,7 @@ def encode_data(model, data_loader, log_step=10, logging=print):
         model.logger = val_logger
 
         # compute the embeddings
-        img_emb, cap_emb, cap_len = model.forward_emb(images, captions, lengths)
+        cap_emb, img_emb = model.forward_emb(images, captions, lengths)
         # print(img_emb)
         if img_embs is None:
             if img_emb.dim() == 3:
@@ -108,10 +108,10 @@ def encode_data(model, data_loader, log_step=10, logging=print):
         img_embs[ids] = img_emb.data.cpu().numpy().copy()
         cap_embs[ids, :max(lengths), :] = cap_emb.data.cpu().numpy().copy()
         for j, nid in enumerate(ids):
-            cap_lens[nid] = cap_len[j]
+            cap_lens[nid] = lengths[j]
 
         # measure accuracy and record loss
-        model.forward_loss(img_emb, cap_emb, cap_len)
+        model.forward_loss(img_emb, cap_emb, lengths)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -132,8 +132,8 @@ def xattn_sim(images, captions, caplens, opt, shard_size=128):
     """
     Computer pairwise t2i image-caption distance with locality sharding
     """
-    n_im_shard = (len(images) - 1) / shard_size + 1
-    n_cap_shard = (len(captions) - 1) / shard_size + 1
+    n_im_shard = (len(images) - 1) // shard_size + 1
+    n_cap_shard = (len(captions) - 1) // shard_size + 1
 
     d = np.zeros((len(images), len(captions)))
     for i in range(n_im_shard):
