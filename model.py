@@ -268,8 +268,8 @@ class CrossAttentionLayer(nn.Module):
         super(CrossAttentionLayer, self).__init__()
         self.norm_func = norm_func
         self.smooth = smooth
-        self.fc_img = nn.Linear(hidden_size, hidden_size)
-        self.fc_txt = nn.Linear(hidden_size, hidden_size)
+        # self.fc_img = nn.Linear(hidden_size, hidden_size)
+        # self.fc_txt = nn.Linear(hidden_size, hidden_size)
 
         self.norm = norm
         self.activation_fun = activation_fun
