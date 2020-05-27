@@ -275,21 +275,21 @@ class CrossAttentionLayer(nn.Module):
         self.activation_fun = activation_fun
 
     def forward(self, txt_embed, img_embed, lengths):
-        txt_attn_embed, img_attn_embed = cross_attention(img_embed, txt_embed, lengths, self.smooth, self.norm_func)
-        txt_attn_embed = self.fc_txt(txt_attn_embed)
-        img_attn_embed = self.fc_img(img_attn_embed)
-
-        if self.activation_fun == 'relu':
-            txt_attn_output = F.relu(txt_attn_embed)
-            img_attn_output = F.relu(img_attn_embed)
-        elif self.activation_fun == 'gelu':
-            txt_attn_output = gelu(txt_attn_embed)
-            img_attn_output = gelu(img_attn_embed)
-        elif self.activation_fun == 'no_activation_fun':
-            txt_attn_output = txt_attn_embed
-            img_attn_output = img_attn_embed
-        else:
-            raise ValueError('Unknown activation function :', self.activation_fun)
+        txt_attn_output, img_attn_output = cross_attention(img_embed, txt_embed, lengths, self.smooth, self.norm_func)
+        # txt_attn_embed = self.fc_txt(txt_attn_embed)
+        # img_attn_embed = self.fc_img(img_attn_embed)
+        #
+        # if self.activation_fun == 'relu':
+        #     txt_attn_output = F.relu(txt_attn_embed)
+        #     img_attn_output = F.relu(img_attn_embed)
+        # elif self.activation_fun == 'gelu':
+        #     txt_attn_output = gelu(txt_attn_embed)
+        #     img_attn_output = gelu(img_attn_embed)
+        # elif self.activation_fun == 'no_activation_fun':
+        #     txt_attn_output = txt_attn_embed
+        #     img_attn_output = img_attn_embed
+        # else:
+        #     raise ValueError('Unknown activation function :', self.activation_fun)
 
         if self.norm:
             txt_attn_output = l2norm(txt_attn_output, -1)
