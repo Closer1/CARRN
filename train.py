@@ -59,7 +59,7 @@ def main():
                         help='Dimensionality of the image embedding')
     parser.add_argument('--norm', action='store_true',
                         help='normalize the text and image embedding')
-    parser.add_argument('--norm_func', default='clipped_leaky_l2norm',
+    parser.add_argument('--norm_func', default='clipped_l2norm',
                         help='clipped_leaky_l2norm|clipped_l2norm|l2norm|'
                              'clipped_leaky_l1norm|clipped_l1norm|l1norm|no_norm|softmax')
     parser.add_argument('--agg_func', default='Mean',
