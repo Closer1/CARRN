@@ -275,25 +275,25 @@ class CrossAttentionLayer(nn.Module):
         self.activation_fun = activation_fun
 
     def forward(self, txt_embed, img_embed, lengths):
-        txt_attn_embed, img_attn_embed = cross_attention(img_embed, txt_embed, lengths, self.smooth, self.norm_func)
-        txt_attn_embed = self.fc_txt(txt_attn_embed)
-        img_attn_embed = self.fc_img(img_attn_embed)
-
-        if self.activation_fun == 'relu':
-            txt_attn_output = F.relu(txt_attn_embed)
-            img_attn_output = F.relu(img_attn_embed)
-        elif self.activation_fun == 'gelu':
-            txt_attn_output = gelu(txt_attn_embed)
-            img_attn_output = gelu(img_attn_embed)
-        elif self.activation_fun == 'no_activation_fun':
-            txt_attn_output = txt_attn_embed
-            img_attn_output = img_attn_embed
-        else:
-            raise ValueError('Unknown activation function :', self.activation_fun)
+        txt_attn_output, img_attn_output = cross_attention(img_embed, txt_embed, lengths, self.smooth, self.norm_func)
+        # txt_attn_embed = self.fc_txt(txt_attn_embed)
+        # img_attn_embed = self.fc_img(img_attn_embed)
+        #
+        # if self.activation_fun == 'relu':
+        #     txt_attn_output = F.relu(txt_attn_embed)
+        #     img_attn_output = F.relu(img_attn_embed)
+        # elif self.activation_fun == 'gelu':
+        #     txt_attn_output = gelu(txt_attn_embed)
+        #     img_attn_output = gelu(img_attn_embed)
+        # elif self.activation_fun == 'no_activation_fun':
+        #     txt_attn_output = txt_attn_embed
+        #     img_attn_output = img_attn_embed
+        # else:
+        #     raise ValueError('Unknown activation function :', self.activation_fun)
 
         if self.norm:
-            txt_attn_output = l2norm(txt_attn_output, -1)
-            img_attn_output = l2norm(img_attn_output, -1)
+            txt_attn_output = l2norm(txt_attn_output, 2)
+            img_attn_output = l2norm(img_attn_output, 2)
 
         return txt_attn_output, img_attn_output
 
@@ -310,8 +310,8 @@ class CARRNEncoder(nn.Module):
 
         self.GCN_1 = GCN(in_channels=hidden_size, inter_channels=hidden_size)
         self.GCN_2 = GCN(in_channels=hidden_size, inter_channels=hidden_size)
-        self.GCN_3 = GCN(in_channels=hidden_size, inter_channels=hidden_size)
-        self.GCN_4 = GCN(in_channels=hidden_size, inter_channels=hidden_size)
+        # self.GCN_3 = GCN(in_channels=hidden_size, inter_channels=hidden_size)
+        # self.GCN_4 = GCN(in_channels=hidden_size, inter_channels=hidden_size)
 
         self.cross_attn1 = CrossAttentionLayer(hidden_size, smooth, norm_func, norm, activation_func)
 
@@ -331,8 +331,8 @@ class CARRNEncoder(nn.Module):
         gcn_img_embed = img_embed.permute(0, 2, 1)
         gcn_img_embed = self.GCN_1(gcn_img_embed)
         gcn_img_embed = self.GCN_2(gcn_img_embed)
-        gcn_img_embed = self.GCN_3(gcn_img_embed)
-        gcn_img_embed = self.GCN_4(gcn_img_embed)
+        # gcn_img_embed = self.GCN_3(gcn_img_embed)
+        # gcn_img_embed = self.GCN_4(gcn_img_embed)
 
         gcn_img_embed = gcn_img_embed.permute(0, 2, 1)
         gcn_img_embed = l2norm(gcn_img_embed, 2)
