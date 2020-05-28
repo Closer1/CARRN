@@ -268,8 +268,8 @@ class CrossAttentionLayer(nn.Module):
         super(CrossAttentionLayer, self).__init__()
         self.norm_func = norm_func
         self.smooth = smooth
-        # self.fc_img = nn.Linear(hidden_size, hidden_size)
-        # self.fc_txt = nn.Linear(hidden_size, hidden_size)
+        self.fc_img = nn.Linear(hidden_size, hidden_size)
+        self.fc_txt = nn.Linear(hidden_size, hidden_size)
 
         self.norm = norm
         self.activation_fun = activation_fun
@@ -559,7 +559,7 @@ class CARRN(object):
         self.logger.update('lr', self.optimizer.param_groups[0]['lr'])
 
         # compute the embeddings
-        img_emb, cap_emb = self.forward_emb(images, captions, lengths)
+        cap_emb, img_emb = self.forward_emb(images, captions, lengths)
 
         # measure accuracy and record loss
         self.optimizer.zero_grad()
